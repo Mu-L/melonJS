@@ -3,7 +3,8 @@ import { Line } from "../src/index.js";
 
 describe("Shape : Line", () => {
 	describe("Line", () => {
-		var line, bounds;
+		let line;
+		let bounds;
 
 		beforeAll(() => {
 			line = new Line(0, 0, [
@@ -14,20 +15,15 @@ describe("Shape : Line", () => {
 		});
 
 		it("requires exactly 2 points", () => {
-			function badLine1() {
-				return new Line(0, 0, [{ x: 0, y: 0 }]);
-			}
-
-			function badLine2() {
-				return new Line(0, 0, [
-					{ x: 0, y: 0 },
-					{ x: 0, y: 0 },
-					{ x: 28, y: 60 },
-				]);
-			}
-
-			expect(badLine1).toThrow();
-			expect(badLine2).toThrow();
+			expect(() => new Line(0, 0, [{ x: 0, y: 0 }])).toThrow();
+			expect(
+				() =>
+					new Line(0, 0, [
+						{ x: 0, y: 0 },
+						{ x: 0, y: 0 },
+						{ x: 28, y: 60 },
+					]),
+			).toThrow();
 		});
 
 		it("contains the point (0, 0)", () => {
@@ -80,8 +76,8 @@ describe("Shape : Line", () => {
 		});
 
 		it("Line cloning", () => {
-			var clone = line.clone();
-			var cloneBounds = clone.getBounds();
+			const clone = line.clone();
+			const cloneBounds = clone.getBounds();
 			expect(line.pos.equals(clone.pos)).toEqual(true);
 			expect(bounds.width).toEqual(cloneBounds.width);
 			expect(bounds.height).toEqual(cloneBounds.height);

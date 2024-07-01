@@ -4,7 +4,7 @@ import { Vector2d, pool } from "../src/index.js";
 describe("pool", () => {
 	describe("poolable object", () => {
 		pool.register("Vector2d", Vector2d, true);
-		var vec2 = pool.pull("Vector2d");
+		let vec2 = pool.pull("Vector2d");
 
 		it("pulled object is of the correct instance", () => {
 			expect(vec2).toBeInstanceOf(Vector2d);
@@ -39,7 +39,7 @@ describe("pool", () => {
 		}
 		pool.register("dummyClass", dummyClass, false);
 
-		var obj = pool.pull("dummyClass");
+		const obj = pool.pull("dummyClass");
 
 		it("pulled object is of the correct instance", () => {
 			expect(obj).toBeInstanceOf(dummyClass);
@@ -47,12 +47,10 @@ describe("pool", () => {
 		});
 
 		it("object is not recycled when pushed and pulled back again", () => {
-			function nonPoolableObject() {
-				pool.push(obj);
-			}
-
 			// pushing it into the object pool should throw an exception
-			expect(nonPoolableObject).toThrow();
+			expect(() => {
+				pool.push(obj);
+			}).toThrow();
 		});
 	});
 });

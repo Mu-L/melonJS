@@ -3,7 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("Shape : Polygon", () => {
 	describe("Polygon", () => {
-		var stars, bounds;
+		let stars;
+		let bounds;
 
 		beforeAll(() => {
 			// define a polygon object (star from the the shape example)
@@ -53,13 +54,13 @@ describe("Shape : Polygon", () => {
 		});
 
 		it("requires at least 3 points", () => {
-			function badPolygon() {
-				return new Polygon(0, 0, [
-					{ x: 0, y: 0 },
-					{ x: 28, y: 60 },
-				]);
-			}
-			expect(badPolygon).toThrow();
+			expect(
+				() =>
+					new Polygon(0, 0, [
+						{ x: 0, y: 0 },
+						{ x: 28, y: 60 },
+					]),
+			).toThrow();
 		});
 
 		it("contains the point (75, 75)", () => {
@@ -85,7 +86,7 @@ describe("Shape : Polygon", () => {
 	});
 
 	describe("Polygon transformation", () => {
-		var rect;
+		let rect;
 
 		beforeAll(() => {
 			// a "rectangle" polygon object
@@ -107,7 +108,7 @@ describe("Shape : Polygon", () => {
 	});
 
 	describe("Isometric transformation", () => {
-		var shape;
+		let shape;
 
 		beforeAll(() => {
 			shape = new Polygon(0, 0, [
