@@ -4,6 +4,7 @@ import {
 	off,
 	on,
 } from "../../system/event.ts";
+import Texture2d from "../texture/texture2d.ts";
 import GLShader from "./glshader.js";
 import quadVertex from "./shaders/quad.vert";
 
@@ -173,7 +174,13 @@ export default class ShaderEffect {
 	 * @param {object|Float32Array} value - the value to assign to that uniform
 	 */
 	setUniform(name, value) {
-		if (this.enabled) {
+		// forward whenever a live shader exists (WebGL mode): GLShader handles
+		// the suspended (context-lost) state by deferring to its uniform
+		// cache. Gating on `enabled` here silently dropped values set during
+		// a loss window — defeating that replay — or while the user had the
+		// effect disabled. Canvas stubs (no shader) and destroyed effects
+		// (partial-state immunity, see destroy()) keep no-oping.
+		if (typeof this._shader !== "undefined" && this.destroyed !== true) {
 			this._shader.setUniform(name, value);
 		}
 	}
@@ -208,7 +215,15 @@ export default class ShaderEffect {
 		// would make setUniform throw), and not cached (so it stays correct
 		// across a context-loss recompile). `enabled` is false while suspended
 		// or destroyed, so the uniforms map is never null here.
-		if (this.enabled && typeof this._shader.uniforms.uTime !== "undefined") {
+		// skipped while suspended (uniforms === null mid-context-loss; a
+		// per-frame call self-heals on the next frame) and on Canvas stubs;
+		// a USER-disabled but live effect still takes the value
+		if (
+			typeof this._shader !== "undefined" &&
+			this.destroyed !== true &&
+			!this._shader.suspended &&
+			typeof this._shader.uniforms.uTime !== "undefined"
+		) {
 			this._shader.setUniform("uTime", seconds);
 		}
 		return this;
@@ -223,10 +238,11 @@ export default class ShaderEffect {
 	 * texture-unit juggling.
 	 *
 	 * Declare the sampler in your fragment (`uniform sampler2D <name>;`) and pass
-	 * that name here. Any engine texture works — e.g. `noiseTexture.getTexture()`.
-	 * No-op in Canvas mode.
+	 * that name here. Any engine texture works — a {@link Texture2d} asset
+	 * (`NoiseTexture2d`, `TextureAtlas`, …) can be passed directly, or a raw
+	 * drawable source. No-op in Canvas mode.
 	 * @param {string} name - the `sampler2D` uniform name declared in the fragment
-	 * @param {HTMLImageElement|HTMLCanvasElement|OffscreenCanvas|ImageBitmap} image - the texture source
+	 * @param {Texture2d|HTMLImageElement|HTMLCanvasElement|OffscreenCanvas|ImageBitmap} image - the texture: an engine texture asset, or a raw drawable source
 	 * @param {"repeat"|"repeat-x"|"repeat-y"|"no-repeat"} [repeat="no-repeat"] - wrap mode; use `"repeat"` for a tiled/scrolled texture (power-of-two size under WebGL 1)
 	 * @returns {ShaderEffect} this effect for chaining
 	 * @example
@@ -239,31 +255,56 @@ export default class ShaderEffect {
 	 *         vec2 flow = texture2D(uNoise, uv + uTime * 0.03).rg - 0.5;
 	 *         return texture2D(uSampler, uv + flow * 0.02);
 	 *     }`);
-	 * water.setTexture("uNoise", noise.getTexture(), "repeat");
+	 * water.setTexture("uNoise", noise, "repeat");
 	 * waterSprite.shader = water;
 	 * // each frame, in your Stage's update(dt):
 	 * water.setTime(me.timer.getTime() / 1000);
 	 */
 	setTexture(name, image, repeat = "no-repeat") {
-		if (this.enabled) {
-			const existing = this._extraTextures.get(name);
-			if (existing) {
-				// release the previous GL texture + unit reservation before
-				// replacing the binding
-				if (existing.tex !== null) {
-					this._shader.gl.deleteTexture(existing.tex);
-				}
-				if (existing.unit !== undefined) {
-					this._renderer.cache.releaseUnit(existing.unit);
-				}
-			}
-			this._extraTextures.set(name, {
-				image,
-				repeat,
-				tex: null,
-				unit: undefined,
-			});
+		// Canvas stub (no shader) and destroyed effects: keep the inert no-op
+		if (typeof this._shader === "undefined" || this.destroyed === true) {
+			return this;
 		}
+		// A GPU-resident LIVE source (a frame capture from
+		// renderer.toFrameTexture): keep the wrapper and bind its live GL
+		// handle every draw — never upload a static copy — so re-capturing
+		// into the same slot each frame is picked up with no re-bind. The live
+		// path reads `.glTexture`, so require that handle to be present;
+		// otherwise fall through and unwrap like any static Texture2d asset,
+		// rather than take the live branch and silently never bind.
+		const live =
+			image instanceof Texture2d &&
+			image.isGPUResident === true &&
+			"glTexture" in image;
+		if (!live && image instanceof Texture2d) {
+			image = image.getTexture();
+		}
+		// store the entry regardless of `enabled`: the GL work happens lazily
+		// in _prepareTextures on the next enabled draw, so a binding set while
+		// the effect is disabled — or mid-context-loss, where entries set
+		// during the window used to vanish permanently — survives intact.
+		const existing = this._extraTextures.get(name);
+		if (existing && existing.tex !== null) {
+			// drop the old STATIC GL texture we own so the new image re-uploads
+			// into the SAME reserved unit (kept below) on the next enabled draw.
+			// A live entry never owns a GL texture (tex stays null — the
+			// renderer/caller owns the handle), so this correctly skips it.
+			this._shader.gl.deleteTexture(existing.tex);
+		}
+		this._extraTextures.set(name, {
+			image,
+			repeat,
+			tex: null,
+			live,
+			// keep any unit already reserved for this sampler across the
+			// replace: releasing it here (then re-reserving lazily) would open
+			// a window — unbounded while the effect is disabled — in which the
+			// cache allocator could hand that high unit to a regular texture,
+			// reintroducing the collision reserveUnit() exists to prevent. The
+			// reservation is released only where the unit is truly invalid:
+			// context loss (_onContextLost) and destroy().
+			unit: existing ? existing.unit : undefined,
+		});
 		return this;
 	}
 
@@ -305,24 +346,48 @@ export default class ShaderEffect {
 				cache.reserveUnit(nextUnit);
 			}
 			nextUnit = entry.unit - 1;
-			if (entry.tex === null) {
-				batcher.createTexture2D(
-					entry.unit,
-					entry.image,
-					filter,
-					entry.repeat,
-					entry.image.width,
-					entry.image.height,
-					false, // premultipliedAlpha — keep raw texel values
-					false, // mipmap — not needed, and NPOT-unsafe under WebGL 1
-					undefined,
-					false, // flush — the following draw flushes with everything bound
-				);
-				entry.tex = batcher.boundTextures[entry.unit];
+			let bound = false;
+			if (entry.live === true) {
+				// live GPU-resident source (frame capture): bind the current
+				// handle fresh each draw — the renderer refreshes it in place,
+				// so this samples the latest frame. Never uploaded, never freed
+				// by this effect. Skip binding if not captured yet (null).
+				const glTex = entry.image.glTexture;
+				if (glTex !== null && typeof glTex !== "undefined") {
+					batcher.bindTexture2D(glTex, entry.unit, false);
+					this._shader.setUniform(name, entry.unit);
+					bound = true;
+				}
 			} else {
-				batcher.bindTexture2D(entry.tex, entry.unit, false);
+				if (entry.tex === null) {
+					batcher.createTexture2D(
+						entry.unit,
+						entry.image,
+						filter,
+						entry.repeat,
+						entry.image.width,
+						entry.image.height,
+						false, // premultipliedAlpha — keep raw texel values
+						false, // mipmap — not needed, and NPOT-unsafe under WebGL 1
+						undefined,
+						false, // flush — the following draw flushes with everything bound
+					);
+					entry.tex = batcher.boundTextures[entry.unit];
+				} else {
+					batcher.bindTexture2D(entry.tex, entry.unit, false);
+				}
+				this._shader.setUniform(name, entry.unit);
+				bound = true;
 			}
-			this._shader.setUniform(name, entry.unit);
+			// only when we actually bound: this sampler took a reserved high unit
+			// DIRECTLY (bypassing the shared texture cache), which overlaps the
+			// lit quad batcher's normal-map units — invalidate it on the OTHER
+			// batchers so a later lit draw re-binds its normal there instead of
+			// sampling this texture. A skipped live bind (no capture yet) clobbers
+			// nothing, so there's nothing to invalidate.
+			if (bound) {
+				batcher.renderer.invalidateTextureUnit(entry.unit, batcher);
+			}
 		}
 	}
 

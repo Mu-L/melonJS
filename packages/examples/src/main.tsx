@@ -98,9 +98,14 @@ const ExampleSpriteIlluminator = lazy(() =>
 		default: m.ExampleSpriteIlluminator,
 	})),
 );
-const ExampleWaterRefraction = lazy(() =>
-	import("./examples/waterRefraction/ExampleWaterRefraction").then((m) => ({
-		default: m.ExampleWaterRefraction,
+const ExampleAquarium = lazy(() =>
+	import("./examples/aquarium/ExampleAquarium").then((m) => ({
+		default: m.ExampleAquarium,
+	})),
+);
+const ExampleHeatHaze = lazy(() =>
+	import("./examples/heatHaze/ExampleHeatHaze").then((m) => ({
+		default: m.ExampleHeatHaze,
 	})),
 );
 const ExampleLineOfSight = lazy(() =>
@@ -362,12 +367,20 @@ const examples: {
 			"Per-pixel sprite lighting from normal maps. Animated character + foreground prop tile lit by a moving cursor light, faithfully ported from CodeAndWeb's cocos2d-x demo.",
 	},
 	{
-		component: <ExampleWaterRefraction />,
-		label: "Water Refraction",
-		path: "water-refraction",
-		sourceDir: "waterRefraction",
+		component: <ExampleAquarium />,
+		label: "Aquarium",
+		path: "aquarium",
+		sourceDir: "aquarium",
 		description:
-			"GPU UV-refraction: a tiled pool floor rippled through a custom ShaderEffect that samples a second, static NoiseTexture2d bound via setTexture() — scrolled on the GPU (setTime), no per-frame CPU re-bake. Pointer swells, animated caustics, live ripple-strength slider.",
+			"Screen-space refraction via renderer.toFrameTexture(): swimming fish rippled through the live scene, captured on the GPU and distorted by a scrolling NoiseTexture2d.",
+	},
+	{
+		component: <ExampleHeatHaze />,
+		label: "Heat Haze",
+		path: "heat-haze",
+		sourceDir: "heatHaze",
+		description:
+			"renderer.toFrameTexture() over a LIT scene: normal-mapped tiles under a moving Light2d, distorted by a rising heat-haze that captures the lit frame.",
 	},
 	{
 		component: <ExampleLineOfSight />,
